@@ -13,7 +13,7 @@ edition = "2021"
 targets = ["riscv64gc-unknown-none-elf"]
 
 [dependencies]
-embedded-hal = { version = "0.2.7", features = ["unproven"] }
+embedded-hal = { version = "0.2.7", features = ["unproven"]}
 nb = "1"
-k210-pac = "0.2.0"
+k210-pac = { git="https://github.com/AlexisTM/k210-pac", branch = "feature/svd_0_28_0"}
 bitflags = "1.3"
