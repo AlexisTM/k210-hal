@@ -112,6 +112,8 @@ impl SysctlExt for SYSCTL {
             aclk: ACLK { _ownership: () },
             apb0: APB0 { _ownership: () },
             pll0: PLL0 { _ownership: () },
+            pll1: PLL1 { _ownership: () },
+            pll2: PLL2 { _ownership: () },
         }
     }
 }
@@ -122,6 +124,10 @@ pub struct Parts {
     pub aclk: ACLK,
     /// entry for controlling the enable/disable/frequency of pll0
     pub pll0: PLL0,
+    /// Used by ...
+    pub pll1: PLL1,
+    // Used by the I2s component
+    pub pll2: PLL2,
     /// entry for controlling the enable/disable/frequency of apb0
     pub apb0: APB0,
     // todo: SRAM, APB-bus, ROM, DMA, AI, PLL1, PLL2, APB1, APB2
@@ -271,6 +277,7 @@ pub struct PLL1 {
 }
 
 impl PLL1 {
+    #[allow(unused)]
     pub(crate) fn steal() -> Self {
         PLL1 { _ownership: () }
     }
@@ -352,6 +359,7 @@ pub struct PLL2 {
 }
 
 impl PLL2 {
+    #[allow(unused)]
     pub(crate) fn steal() -> Self {
         PLL2 { _ownership: () }
     }
