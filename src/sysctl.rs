@@ -184,54 +184,62 @@ impl APB0 {
 
 /// PLL0, which source is CLOCK_FREQ_IN0,
 /// and the output can be used on ACLK(CPU), SPIs, etc.
+
+#[macro_export]
+macro_rules! pll_impl_def {
+    ( $name:tt, $middle_name: ident, $lower_name: ident) => {
+        impl $name {
+            #[allow(unused)]
+            pub(crate) fn steal() -> Self {
+                $name { _ownership: () }
+            }
+
+            #[inline(always)]
+            fn reset(&mut self) {
+                sysctl().$lower_name.modify(|_, w| w.reset().clear_bit());
+                sysctl().$lower_name.modify(|_, w| w.reset().set_bit());
+                core::sync::atomic::compiler_fence(Ordering::SeqCst);
+                core::sync::atomic::compiler_fence(Ordering::SeqCst);
+                sysctl().$lower_name.modify(|_, w| w.reset().clear_bit());
+            }
+
+            /// enable PLL0
+            pub fn enable(&mut self) {
+                sysctl()
+                    .$lower_name
+                    .modify(|_, w| w.bypass().clear_bit().pwrd().set_bit());
+                self.reset();
+                self.lock();
+                sysctl().$lower_name.modify(|_, w| w.out_en().set_bit());
+            }
+
+            /// disable PLL0
+            /// use with caution: PLL0 can be used as source clock of ACLK (so also CPU),
+            /// if you want to disable PLL0, please make the cpu use external clock first
+            pub fn disable(&mut self) {
+                sysctl()
+                    .$lower_name
+                    .modify(|_, w| w.bypass().set_bit().pwrd().clear_bit().out_en().clear_bit());
+            }
+
+            /// Return the frequency of PLL0
+            pub fn get_frequency(&self) -> Hertz {
+                pll_get_freq(PllSelect::$middle_name)
+            }
+        }
+    };
+}
+
 pub struct PLL0 {
     _ownership: (),
 }
 
-impl PLL0 {
-    pub(crate) fn steal() -> Self {
-        PLL0 { _ownership: () }
-    }
+pll_impl_def!(PLL0, Pll0, pll0);
 
+impl PLL0 {
     #[inline(always)]
     fn is_locked(&self) -> bool {
         sysctl().pll_lock.read().pll_lock0() == 0b11
-    }
-
-    fn lock(&mut self) {
-        while !self.is_locked() {
-            sysctl()
-                .pll_lock
-                .modify(|_, w| w.pll_slip_clear0().set_bit())
-        }
-    }
-
-    #[inline(always)]
-    fn reset(&mut self) {
-        sysctl().pll0.modify(|_, w| w.reset().clear_bit());
-        sysctl().pll0.modify(|_, w| w.reset().set_bit());
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        sysctl().pll0.modify(|_, w| w.reset().clear_bit());
-    }
-
-    /// enable PLL0
-    pub fn enable(&mut self) {
-        sysctl()
-            .pll0
-            .modify(|_, w| w.bypass().clear_bit().pwrd().set_bit());
-        self.reset();
-        self.lock();
-        sysctl().pll0.modify(|_, w| w.out_en().set_bit());
-    }
-
-    /// disable PLL0
-    /// use with caution: PLL0 can be used as source clock of ACLK (so also CPU),
-    /// if you want to disable PLL0, please make the cpu use external clock first
-    pub fn disable(&mut self) {
-        sysctl()
-            .pll0
-            .modify(|_, w| w.bypass().set_bit().pwrd().clear_bit().out_en().clear_bit());
     }
 
     /// Set frequency of PLL0
@@ -264,9 +272,12 @@ impl PLL0 {
         Hertz(CLOCK_FREQ_IN0 / nr as u32 * nf as u32 / od as u32)
     }
 
-    /// Return the frequency of PLL0
-    pub fn get_frequency(&self) -> Hertz {
-        pll_get_freq(PllSelect::Pll0)
+    fn lock(&mut self) {
+        while !self.is_locked() {
+            sysctl()
+                .pll_lock
+                .modify(|_, w| w.pll_slip_clear0().set_bit())
+        }
     }
 }
 
@@ -276,12 +287,9 @@ pub struct PLL1 {
     _ownership: (),
 }
 
-impl PLL1 {
-    #[allow(unused)]
-    pub(crate) fn steal() -> Self {
-        PLL1 { _ownership: () }
-    }
+pll_impl_def!(PLL1, Pll1, pll1);
 
+impl PLL1 {
     #[inline(always)]
     fn is_locked(&self) -> bool {
         sysctl().pll_lock.read().pll_lock1() == 0b1
@@ -293,34 +301,6 @@ impl PLL1 {
                 .pll_lock
                 .modify(|_, w| w.pll_slip_clear1().set_bit())
         }
-    }
-
-    #[inline(always)]
-    fn reset(&mut self) {
-        sysctl().pll1.modify(|_, w| w.reset().clear_bit());
-        sysctl().pll1.modify(|_, w| w.reset().set_bit());
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        sysctl().pll1.modify(|_, w| w.reset().clear_bit());
-    }
-
-    /// enable PLL1
-    pub fn enable(&mut self) {
-        sysctl()
-            .pll1
-            .modify(|_, w| w.bypass().clear_bit().pwrd().set_bit());
-        self.reset();
-        self.lock();
-        sysctl().pll1.modify(|_, w| w.out_en().set_bit());
-    }
-
-    /// disable PLL1
-    /// use with caution: PLL1 can be used as source clock of ACLK (so also CPU),
-    /// if you want to disable PLL1, please make the cpu use external clock first
-    pub fn disable(&mut self) {
-        sysctl()
-            .pll1
-            .modify(|_, w| w.bypass().set_bit().pwrd().clear_bit().out_en().clear_bit());
     }
 
     /// Set frequency of PLL1
@@ -344,11 +324,6 @@ impl PLL1 {
         self.enable();
         Hertz(CLOCK_FREQ_IN0 / nr as u32 * nf as u32 / od as u32)
     }
-
-    /// Return the frequency of PLL1
-    pub fn get_frequency(&self) -> Hertz {
-        pll_get_freq(PllSelect::Pll1)
-    }
 }
 
 // PLL2 differs from PLL0 only with the "pll_lock2" value compared to 0b1 and
@@ -358,12 +333,9 @@ pub struct PLL2 {
     _ownership: (),
 }
 
-impl PLL2 {
-    #[allow(unused)]
-    pub(crate) fn steal() -> Self {
-        PLL2 { _ownership: () }
-    }
+pll_impl_def!(PLL2, Pll2, pll2);
 
+impl PLL2 {
     #[inline(always)]
     fn is_locked(&self) -> bool {
         sysctl().pll_lock.read().pll_lock2() == 0b1
@@ -375,34 +347,6 @@ impl PLL2 {
                 .pll_lock
                 .modify(|_, w| w.pll_slip_clear2().set_bit())
         }
-    }
-
-    #[inline(always)]
-    fn reset(&mut self) {
-        sysctl().pll2.modify(|_, w| w.reset().clear_bit());
-        sysctl().pll2.modify(|_, w| w.reset().set_bit());
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        sysctl().pll2.modify(|_, w| w.reset().clear_bit());
-    }
-
-    /// enable PLL0
-    pub fn enable(&mut self) {
-        sysctl()
-            .pll2
-            .modify(|_, w| w.bypass().clear_bit().pwrd().set_bit());
-        self.reset();
-        self.lock();
-        sysctl().pll2.modify(|_, w| w.out_en().set_bit());
-    }
-
-    /// disable PLL0
-    /// use with caution: PLL0 can be used as source clock of ACLK (so also CPU),
-    /// if you want to disable PLL0, please make the cpu use external clock first
-    pub fn disable(&mut self) {
-        sysctl()
-            .pll2
-            .modify(|_, w| w.bypass().set_bit().pwrd().clear_bit().out_en().clear_bit());
     }
 
     /// Set frequency of PLL0
@@ -433,11 +377,6 @@ impl PLL2 {
             sysctl().clk_sel0.modify(|_, w| w.aclk_sel().set_bit());
         }
         Hertz(CLOCK_FREQ_IN0 / nr as u32 * nf as u32 / od as u32)
-    }
-
-    /// Return the frequency of PLL0
-    pub fn get_frequency(&self) -> Hertz {
-        pll_get_freq(PllSelect::Pll2)
     }
 }
 
