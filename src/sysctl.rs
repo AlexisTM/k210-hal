@@ -6,7 +6,8 @@ use crate::time::Hertz;
 use core::sync::atomic::Ordering;
 
 const CLOCK_FREQ_IN0: u32 = 26_000_000;
-enum PllSelect {
+pub(crate) const CLOCK_FREQ_PLL2_DEFAULT: u32 = 45_158_400u32;
+pub(crate) enum PllSelect {
     In0,
     Pll0,
     Pll1,
@@ -71,7 +72,7 @@ fn calculate_pll_config(freq_in: u32, freq: u32) -> (u8, u8, u8) {
     unreachable!()
 }
 
-fn pll_get_freq(select: PllSelect) -> Hertz {
+pub(crate) fn pll_get_freq(select: PllSelect) -> Hertz {
     match select {
         PllSelect::In0 => Hertz(CLOCK_FREQ_IN0),
         PllSelect::Pll0 => {

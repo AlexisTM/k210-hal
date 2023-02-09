@@ -2,26 +2,21 @@ use crate::{
     fpioa,
     pac::{I2S0, SYSCTL},
     prelude::*,
-    sysctl::{clk_en_peri, peri_reset, sysctl},
+    sysctl::{
+        clk_en_peri, peri_reset, pll_get_freq, sysctl, PllSelect, CLOCK_FREQ_PLL2_DEFAULT, PLL2,
+    },
+    time::Hertz,
 };
 use embedded_i2s;
-use k210_pac::{i2s0::ccr::CLK_WORD_SIZE_A, plic::targets::threshold};
-
-pub struct Pins {
-    // pub i2s_mclk: fpioa::I2S0_MCLK,   // "I2S Master Clock
-    pub i2s_sclk: fpioa::I2S0_SCLK,        // "I2S Serial Clock(BCLK)
-    pub i2s_ws: fpioa::I2S0_WS,            // "I2S Word Select(LRCLK)
-    pub i2s_d0: Option<fpioa::I2S0_IN_D0>, // "I2S Serial Data Input 0
-    pub i2s_d1: Option<fpioa::I2S0_IN_D1>, // "I2S Serial Data Input 1
-    pub i2s_d2: Option<fpioa::I2S0_IN_D2>, // "I2S Serial Data Input 2
-    pub i2s_d3: Option<fpioa::I2S0_IN_D3>, // "I2S Serial Data Input 3
-}
+use k210_pac::{
+    i2s0::{ccr::CLK_WORD_SIZE_A, channel},
+    plic::targets::threshold,
+};
 
 /// I2S0
 /// Should we take ownership of the specific pins to ensure they are set?
 pub struct I2s<I2S0> {
     i2s: I2S0,
-    _pins: Pins,
 }
 
 pub enum WordLength {
@@ -54,7 +49,9 @@ pub enum AlignMode {
 }
 
 impl I2s<I2S0> {
-    pub fn new(i2s: I2S0, _pins: Pins) -> Self {
+    pub fn new(i2s: I2S0, pll2: &mut PLL2) -> Self {
+        pll2.set_frequency(Hertz(CLOCK_FREQ_PLL2_DEFAULT));
+
         // sysctl_clock_enable(SYSCTL_CLOCK_I2S0 + device_num);
         clk_en_peri().modify(|_, w| w.i2s0_clk_en().set_bit());
         // sysctl_reset(SYSCTL_RESET_I2S0 + device_num);
@@ -67,24 +64,6 @@ impl I2s<I2S0> {
         // sysctl_clock_enable(7 + device_num);
         // Clock enable
         i2s.cer.modify(|_, w| w.clken().clear_bit());
-        // Clock configuration
-        /*
-        i2s.ccr.modify(|_, w| {
-            w.clk_gate()
-                .cycles12()
-                .clk_word_size()
-                .cycles16()
-                .align_mode()
-                .standard()
-                .dma_tx_en()
-                .clear_bit()
-                .dma_rx_en()
-                .clear_bit()
-                .dma_divide_16()
-                .clear_bit()
-                .sign_expand_en()
-                .clear_bit()
-        }); */
 
         // i2s_set_enable(device_num, 1);
         i2s.ier.modify(|_, w| w.ien().set_bit());
@@ -125,7 +104,7 @@ impl I2s<I2S0> {
         i2s.ccr
             .modify(|_, w| w.sign_expand_en().set_bit().dma_rx_en().set_bit());
 
-        Self { i2s, _pins }
+        Self { i2s }
     }
 
     pub fn set_rx_word_length(&self, word_length: WordLength) {
@@ -183,12 +162,33 @@ impl I2s<I2S0> {
         self.i2s.cer.modify(|_, w| w.clken().set_bit());
     }
 
-    pub fn set_sample_rate(&self, sample_rate: u32) {
+    pub fn set_sample_rate(&self, sample_rate: Hertz) {
+        let sample_rate = sample_rate.0;
         let word_size_raw = self.i2s.ccr.read().clk_word_size().bits();
         let word_size = (word_size_raw + 2) * 8;
-        let pll2_clock = 1000000u32;
-        // pll2_clock = sysctl_pll_get_freq(SYSCTL_PLL2);
+        let pll2_clock = pll_get_freq(PllSelect::Pll2).0;
         let threshold: u32 = pll2_clock / (sample_rate * 2u32 * u32::from(word_size) * 2u32) - 1u32;
+        sysctl()
+            .clk_th4
+            .modify(|_, w| w.i2s0_mclk().variant(threshold as u8));
+    }
+
+    pub fn receive_data(&self, chan_id: usize, buf: &mut [u64]) {
+        let mut i: usize = 0;
+        if chan_id >= self.i2s.channel.len() {
+            return;
+        }
+
+        let chan = &self.i2s.channel[chan_id];
+        // Read overrun reset
+        chan.ror.read();
+        while i < buf.len() {
+            if chan.isr.read().rxda().bit_is_set() {
+                buf[i] = u64::from(chan.left_rxtx.read().bits()) << 32;
+                buf[i] = chan.right_rxtx.read().bits().into();
+                i = i + 1;
+            }
+        }
     }
 }
 
