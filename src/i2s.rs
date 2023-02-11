@@ -1,16 +1,10 @@
 use crate::{
-    fpioa,
-    pac::{I2S0, SYSCTL},
+    pac::{I2S0},
     prelude::*,
     sysctl::{
         clk_en_peri, peri_reset, pll_get_freq, sysctl, PllSelect, CLOCK_FREQ_PLL2_DEFAULT, PLL2,
     },
     time::Hertz,
-};
-use embedded_i2s;
-use k210_pac::{
-    i2s0::{ccr::CLK_WORD_SIZE_A, channel},
-    plic::targets::threshold,
 };
 
 /// I2S0
@@ -173,65 +167,55 @@ impl I2s<I2S0> {
             .modify(|_, w| w.i2s0_mclk().variant(threshold as u8));
     }
 
-    pub fn receive_data(&self, chan_id: usize, buf: &mut [u64]) {
+    pub fn receive_chan<const SIZE: usize>(
+        &self,
+        chan_id: usize,
+        left_words: &mut [u32; SIZE],
+        right_words: &mut [u32; SIZE],
+    ) {
         let mut i: usize = 0;
         if chan_id >= self.i2s.channel.len() {
             return;
         }
 
         let chan = &self.i2s.channel[chan_id];
-        // Read overrun reset
+        // Reset the RX overrun
         chan.ror.read();
-        while i < buf.len() {
+        while i < SIZE {
             if chan.isr.read().rxda().bit_is_set() {
-                buf[i] = u64::from(chan.left_rxtx.read().bits()) << 32;
-                buf[i] = chan.right_rxtx.read().bits().into();
+                left_words[i] = chan.left_rxtx.read().bits().into();
+                right_words[i] = chan.right_rxtx.read().bits().into();
                 i = i + 1;
             }
         }
     }
-}
 
-impl embedded_i2s::blocking::I2s<u8> for I2s<I2S0> {
-    type Error = u8;
-    /// Reads enough bytes to fill `left_words` and `right_words`.
-    ///
-    /// It is allowed for `left_words` and `right_words` to have different lengths.
-    /// The read runs for `max(left_words.len(), right_words.len())` words.
-    /// Incoming words after the shorter buffer has been filled will be discarded.
-    fn read<'w>(
-        &mut self,
-        left_words: &'w mut [u8],
-        right_words: &'w mut [u8],
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
+    pub fn receive_all<const SIZE: usize>(
+        &self,
+        left_words: &mut [[u32; SIZE]; 4],
+        right_words: &mut [[u32; SIZE]; 4],
+    ) {
+        let mut current_byte: [usize; 4] = [0, 0, 0, 0];
+        // Reset the RX overrun
 
-    /// Sends `left_words` and `right_words`.
-    ///
-    /// It is allowed for `left_words` and `right_words` to have different lengths.
-    /// The write runs for `max(left_words.len(), right_words.len())` words.
-    /// The value of words sent for the shorter channel after its buffer has been sent
-    /// is implementation-defined, typically `0x00`, `0xFF`, or configurable.
-    fn write<'w>(
-        &mut self,
-        left_words: &'w [u8],
-        right_words: &'w [u8],
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    /// Sends `left_words` and `right_words` getting the data from iterators.
-    ///
-    /// It is allowed for `left_words` and `right_words` to have different lengths.
-    /// The write runs for `max(left_words.len(), right_words.len())` words.
-    /// The value of words sent for the shorter channel after its buffer has been sent
-    /// is implementation-defined, typically `0x00`, `0xFF`, or configurable.
-    fn write_iter<LW, RW>(&mut self, left_words: LW, right_words: RW) -> Result<(), Self::Error>
-    where
-        LW: IntoIterator<Item = u8>,
-        RW: IntoIterator<Item = u8>,
-    {
-        todo!()
+        for channel in self.i2s.channel.iter() {
+            channel.ror.read();
+        }
+        while current_byte[0] < SIZE
+            && current_byte[1] < SIZE
+            && current_byte[2] < SIZE
+            && current_byte[3] < SIZE
+        {
+            for chan_id in 0..self.i2s.channel.len() {
+                let channel = &self.i2s.channel[chan_id];
+                if current_byte[chan_id] < SIZE && channel.isr.read().rxda().bit_is_set() {
+                    left_words[chan_id][current_byte[chan_id]] =
+                        channel.left_rxtx.read().bits().into();
+                    right_words[chan_id][current_byte[chan_id]] =
+                        channel.right_rxtx.read().bits().into();
+                    current_byte[chan_id] = current_byte[chan_id] + 1;
+                }
+            }
+        }
     }
 }
